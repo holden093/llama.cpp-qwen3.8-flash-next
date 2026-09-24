@@ -1,5 +1,7 @@
 #include "llama-model-loader.h"
 
+#include <limits>
+
 #include "ggml-alloc.h"
 #include "ggml.h"
 #include "gguf.h"
@@ -327,6 +329,21 @@ namespace GGUFMeta {
             default:
                 throw std::runtime_error(format("%s is not a string/float32/uint32/int32/uint64 array", key.c_str()));
         }
+        // DwarfStar-packed GGUFs store small integer arrays as u64: narrow them if every value fits
+        if constexpr (std::is_same<T, int32_t>::value || std::is_same<T, uint32_t>::value) {
+            if (!type_ok && arr_info.gt == GGUF_TYPE_UINT64) {
+                const uint64_t * values = (const uint64_t *) arr_info.data;
+                result.resize(arr_info.length);
+                for (size_t i = 0; i < arr_info.length; ++i) {
+                    if (values[i] > (uint64_t) std::numeric_limits<T>::max()) {
+                        throw std::runtime_error(format("%s value %llu does not fit the expected element type",
+                                                        key.c_str(), (unsigned long long) values[i]));
+                    }
+                    result[i] = static_cast<T>(values[i]);
+                }
+                return true;
+            }
+        }
         if (!type_ok) {
             throw std::runtime_error(format("%s has wrong array element type %s", key.c_str(), gguf_type_name(arr_info.gt)));
         }
@@ -373,6 +390,23 @@ namespace GGUFMeta {
             case GGUF_TYPE_STRING:  type_ok = (std::is_same<T, std::string>::value); break;
             default:
                 throw std::runtime_error(format("%s is not a string/float32/uint32/int32/uint64 array", key.c_str()));
+        }
+        // DwarfStar-packed GGUFs store small integer arrays as u64: narrow them if every value fits
+        if constexpr (std::is_same<T, int32_t>::value || std::is_same<T, uint32_t>::value) {
+            if (!type_ok && arr_info.gt == GGUF_TYPE_UINT64) {
+                if (arr_info.length > N_MAX) {
+                    throw std::runtime_error(format("array length %u for key %s exceeds max %u", (uint32_t) arr_info.length, key.c_str(), (uint32_t) N_MAX));
+                }
+                const uint64_t * values = (const uint64_t *) arr_info.data;
+                for (size_t i = 0; i < arr_info.length; ++i) {
+                    if (values[i] > (uint64_t) std::numeric_limits<T>::max()) {
+                        throw std::runtime_error(format("%s value %llu does not fit the expected element type",
+                                                        key.c_str(), (unsigned long long) values[i]));
+                    }
+                    result[i] = static_cast<T>(values[i]);
+                }
+                return true;
+            }
         }
         if (!type_ok) {
             throw std::runtime_error(format("%s has wrong array element type %s", key.c_str(), gguf_type_name(arr_info.gt)));
