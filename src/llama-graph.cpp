@@ -2301,6 +2301,15 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
             GGML_ABORT("fatal error");
     }
 
+    if (down_exps->ne[0] > cur->ne[0]) {
+        // down_exps stored with a padded input width: zero-extend the activation
+        if (!ggml_is_contiguous(cur)) {
+            cur = ggml_cont(ctx0, cur);
+        }
+        cur = ggml_pad(ctx0, cur, down_exps->ne[0] - cur->ne[0], 0, 0, 0);
+        cb(cur, "ffn_moe_down_pad", il);
+    }
+
     experts = build_lora_mm_id(down_exps, cur, selected_experts, down_exps_s); // [n_embd, n_expert_used, n_tokens]
     if (arch == LLM_ARCH_MISTRAL4) {
         // src1 can exceed F16 range

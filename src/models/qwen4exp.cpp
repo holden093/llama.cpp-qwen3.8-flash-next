@@ -273,7 +273,16 @@ void llama_model_qwen4exp::load_arch_tensors(llama_model_loader & ml) {
         }
 
         layer.ffn_gate_inp  = create_tensor(tn(LLM_TENSOR_FFN_GATE_INP,  "weight", il), { n_embd, n_expert }, flags);
-        layer.ffn_down_exps = create_tensor(tn(LLM_TENSOR_FFN_DOWN_EXPS, "weight", il), { n_ff_exp, n_embd, n_expert }, flags);
+        // DwarfStar-packed GGUFs pad the routed down_exps input width (640 -> 768) so that
+        // 256-block K-quants fit; take the physical width from the file. build_moe_ffn
+        // zero-extends the activation to match, so the padded columns contribute nothing.
+        int64_t n_ff_down = n_ff_exp;
+        if (const auto * w = ml.get_weight(tn(LLM_TENSOR_FFN_DOWN_EXPS, "weight", il).str().c_str())) {
+            if (w->tensor->ne[0] > n_ff_exp) {
+                n_ff_down = w->tensor->ne[0];
+            }
+        }
+        layer.ffn_down_exps = create_tensor(tn(LLM_TENSOR_FFN_DOWN_EXPS, "weight", il), { n_ff_down, n_embd, n_expert }, flags);
         create_tensor_gate_up_exps(layer, il, n_embd, n_ff_exp, n_expert, flags);
 
         layer.ffn_gate_inp_shexp = create_tensor(tn(LLM_TENSOR_FFN_GATE_INP_SHEXP, "weight", il), { n_embd }, flags);
