@@ -784,6 +784,11 @@ static struct gguf_context * gguf_init_from_reader(const struct gguf_reader & gr
         ctx->size = 0;
         for (size_t i = 0; i < ctx->info.size(); ++i) {
             const gguf_tensor_info & ti = ctx->info[i];
+            // accept an aligned forward gap before a tensor (e.g. DwarfStar page-aligns the
+            // n-gram table); the gap bytes are never read as tensor data
+            if (ti.offset > ctx->size && ti.offset % ctx->alignment == 0) {
+                ctx->size = ti.offset;
+            }
             if (ti.offset != ctx->size) {
                 GGML_LOG_ERROR("%s: tensor '%s' has offset %" PRIu64 ", expected %zu\n",
                     __func__, ti.t.name, ti.offset, ctx->size);
