@@ -17,6 +17,7 @@ struct ggml_cgraph;
 struct ggml_context;
 struct ggml_tensor;
 
+struct llama_lazy_reader;
 struct llama_cparams;
 struct llama_layer;
 
@@ -97,6 +98,25 @@ struct llm_graph_params;
 //
 // llm_graph_input
 //
+
+// a ggml_get_rows() over a table, or staged rows from a lazy reader
+class llm_graph_lazy_rows {
+public:
+    ggml_tensor * build(ggml_context * ctx0, ggml_tensor * table, const llama_lazy_reader * reader, int64_t n_rows);
+
+    void set_rows(const int32_t * idx, int64_t n);
+
+    bool can_reuse(int64_t n_rows) const;
+
+private:
+    const llama_lazy_reader * reader = nullptr;
+
+    // I32 [n_rows] row indices, or F32 [table->ne[0], n_rows] staged rows
+    ggml_tensor * t = nullptr;
+
+    // host side of t, reused across set_rows() calls
+    std::vector<uint8_t> staging;
+};
 
 class llm_graph_input_i {
 public:
@@ -781,6 +801,7 @@ struct llm_graph_params {
 
     ggml_backend_sched_t sched;
     ggml_backend_t backend_cpu;
+    const std::map<const ggml_tensor *, const llama_lazy_reader *> * lazy_readers = nullptr;
 
     const llama_adapter_cvec     * cvec;
     const llama_adapter_loras    * loras;
@@ -1021,6 +1042,15 @@ struct llm_graph_context {
     ggml_backend_sched_t sched;
 
     ggml_backend_t backend_cpu; // TODO: needed by build_attn_mha, figure out a way to remove?
+    const std::map<const ggml_tensor *, const llama_lazy_reader *> * lazy_readers;
+
+    const llama_lazy_reader * lazy_reader(const ggml_tensor * t) const {
+        if (!lazy_readers) {
+            return nullptr;
+        }
+        const auto it = lazy_readers->find(t);
+        return it == lazy_readers->end() ? nullptr : it->second;
+    }
 
     const llama_adapter_cvec     * cvec;
     const llama_adapter_loras    * loras;
