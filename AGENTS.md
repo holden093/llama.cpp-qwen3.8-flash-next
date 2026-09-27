@@ -1,5 +1,9 @@
 # Instructions for llama.cpp
 
+> [!NOTE]
+>
+> This checkout is a private fork for Qwen3.8-Flash-Next that will not be merged upstream. Its patches, tested configuration and measurements are in [README.md](README.md); keep that file current when the patch list or the tested configuration changes.
+
 > [!IMPORTANT]
 >
 > AI-generated code is allowed. What is **not** allowed is submitting code you do not understand. You are 100% responsible for every line, however it was produced.

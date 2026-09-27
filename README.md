@@ -1,126 +1,108 @@
-# llama.cpp
+# llama.cpp for Qwen3.8-Flash-Next
 
-![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
+A private fork of [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) dedicated to
+Qwen3.8-Flash-Next on one machine. It is not meant to be merged upstream. The branch
+`qwen3.8-flash-next` runs the DwarfStar-packed
+[`antirez/qwen3.8-flash-next-gguf`](https://huggingface.co/antirez/qwen3.8-flash-next-gguf)
+Q2 in llama.cpp, with its built-in MTP block, on a single 12 GiB CUDA GPU with the
+routed experts in system RAM (`-cmoe`). For everything else, see the
+[upstream README](https://github.com/ggml-org/llama.cpp/blob/master/README.md).
 
-<div align="center">
+It is llama.cpp **v0.5.0** (`7fe450e1`) plus, in this order:
 
-<b>LLM inference in C/C++</b>
+| Commit | Source | What it does |
+|--|--|--|
+| NextN/MTP draft head | open PR [#28243](https://github.com/ggml-org/llama.cpp/pull/28243) @ `6fcaa16f` (builds on #27836), squashed | loads the MTP block from the main GGUF; `--spec-type draft-mtp` |
+| padded `down_exps` | this branch | accepts `ffn_down_exps` stored `[768, n_embd, n_expert]` for a logical 640 (Q2_K needs 256-blocks) and zero-pads the activation |
+| aligned GGUF gap | this branch | accepts the 4096-aligned gap DwarfStar leaves before the n-gram table |
+| M-RoPE default | this branch | defaults `qwen4exp.rope.dimension_sections` to `[11, 11, 10, 0]` when absent |
+| u64 int arrays | this branch | narrows `compress_ratios` / `ple.layers` stored as u64 to int32 |
+| radix TOP_K | open PR [#28671](https://github.com/ggml-org/llama.cpp/pull/28671) @ `ff2b4367` | radix-select top-k for wide rows when CCCL < 3.2 (CUDA 12.x) |
+| direct lazy reads | open PR [#29030](https://github.com/ggml-org/llama.cpp/pull/29030) @ `e32c6243` | reads n-gram rows with `pread` instead of mmap page faults |
+| MoE expert cache | open PR [#27861](https://github.com/ggml-org/llama.cpp/pull/27861) @ `bccbacdb`, rebased | opt-in `--moe-expert-cache N` (off by default) |
+| QSA pooled-key cache | open PR [#28699](https://github.com/ggml-org/llama.cpp/pull/28699) @ `141f3f56` | incremental indexer key cache (`LLAMA_QSA_NO_POOLED_CACHE=1` disables) |
+| cache + padded down | this branch | zero-pads the cached-expert `down` input too; without it `--moe-expert-cache` aborts on the Q2 file |
+| load-time checks | this branch | rejects default M-RoPE sections that do not fit `n_rot`, and `down_exps` padding other than the quant block size |
+| n-gram prefetch | this branch | `POSIX_FADV_RANDOM` on the lazy reader and `POSIX_FADV_WILLNEED` on each batch of rows, so cold rows cost one disk round trip per token instead of one per row |
+| quantize copy check | this branch | `llama-quantize` no longer asks for an imatrix for tensors kept in their current type, so single tensor groups can be requantized |
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Release](https://img.shields.io/github/v/release/ggml-org/llama.cpp?filter=v*&color=brightgreen)](https://github.com/ggml-org/llama.cpp/releases?q=tag:v0)
-[![Nightly](https://img.shields.io/github/v/release/ggml-org/llama.cpp?label=nightly&filter=b*&color=orange)](https://github.com/ggml-org/llama.cpp/releases?q=b)
-[![Server](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/server.yml?label=Server)](https://github.com/ggml-org/llama.cpp/actions/workflows/server.yml)
-[![Docker](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/docker.yml?label=Docker)](https://github.com/ggml-org/llama.cpp/actions/workflows/docker.yml)
-[![Winget](https://img.shields.io/github/actions/workflow/status/ggml-org/llama.cpp/winget.yml?label=Winget)](https://github.com/ggml-org/llama.cpp/actions/workflows/winget.yml)
+The five PRs are unmerged upstream and may change or be superseded; each is one
+commit here so it can be dropped once it lands. The compatibility patches were
+written with an AI assistant and have not been reviewed upstream. `test-gguf` covers
+the aligned gap, `test-qwen4exp-hparams` the u64 arrays and the M-RoPE default.
 
-[ggml](https://github.com/ggml-org/ggml) / [ops](https://github.com/ggml-org/llama.cpp/blob/master/docs/ops.md) / [maintainer PRs](https://github.com/ggml-org/llama.cpp/issues?q=is%3Apr%20is%3Aopen%20draft%3AFalse%20(author%3Argerganov%20OR%20author%3AKitaitiMakoto%20OR%20author%3Adanbev%20OR%20author%3Aaldehir%20OR%20author%3Amax-krasnyansky%20OR%20author%3ACISC%20OR%20author%3Aggerganov%20OR%20author%3Aam17an%20OR%20author%3Ajhen0409%20OR%20author%3Abartowski1182%20OR%20author%3Anikwen%20OR%20author%3Ahipudding%20OR%20author%3Aravi9%20OR%20author%3AServeurpersoCom%20OR%20author%3Apwilkin%20OR%20author%3Areeselevine%20OR%20author%3Angxson%20OR%20author%3Ajeffbolznv%20OR%20author%3Amarty1885%20OR%20author%3A0cc4m%20OR%20author%3ATitaniumtown%20OR%20author%3Aangt%20OR%20author%3AIMbackK%20OR%20author%3Aarthw%20OR%20author%3AJohannesGaessler%20OR%20author%3AORippler%20OR%20author%3Aruixiang63%20OR%20author%3Axctan%20OR%20author%3Aallozaur%20OR%20author%3Ayomaytk%20OR%20author%3Aaendk%20OR%20author%3Awine99%20OR%20author%3Agaugarg-nv%20OR%20author%3Ataronaeo%20OR%20author%3Aforforever73%20OR%20author%3Alhez%20OR%20author%3Anetrunnereve%20OR%20author%3Afairydreaming)%20sort%3Aupdated-desc) / [dev stats](https://github.com/ggml-org/llama.cpp-dev) / [lib llama API](https://github.com/ggml-org/llama.cpp/issues/9289) / [llama-server REST API](https://github.com/ggml-org/llama.cpp/issues/9291)
+The MoE expert cache is set with `--moe-expert-cache N` (env `LLAMA_ARG_MOE_EXPERT_CACHE`);
+the `LLAMA_MOE_CACHE_SLOTS` name in its commit message and log is from an older revision.
+It only acts on single-token decode, so with `draft-mtp` it skips the multi-token
+verification batches. On the tested configuration below, 8 slots (all the free VRAM
+allows) gave 25.8 tok/s greedy decode against 26.7 without the cache, so it stays off.
 
-</div>
-
-## Quick start
-
-A few options to get `llama.cpp` installed on your machine:
-
-- Visit https://llama.app and follow the instructions
-- Run with Docker - see our [Docker documentation](docs/docker.md)
-- Download pre-built binaries from the [releases page](https://github.com/ggml-org/llama.cpp/releases)
-- Build from source by cloning this repository - check out [our build guide](docs/build.md)
-
-Once installed:
+## Build
 
 ```sh
-# Download and run a model directly from Hugging Face
-llama cli -hf ggml-org/Qwen3.5-0.8B-GGUF
-
-# Launch OpenAI-compatible API server
-llama serve -hf ggml-org/Qwen3.5-0.8B-GGUF
+docker build -f .devops/cuda.Dockerfile --target server \
+  --build-arg UBUNTU_VERSION=24.04 --build-arg CUDA_VERSION=12.8.1 --build-arg CUDA_DOCKER_ARCH=120 \
+  -t llamacpp-cuda:qwen3.8-flash-next .
 ```
 
-<table align="center">
-    <tr>
-        <td align="center" width=50%>
-            <img width="1310" height="888" alt="VLM session with `llama cli`" src="https://github.com/user-attachments/assets/88726b48-1713-48aa-a525-95a02e78afc4" />
-            <i>VLM session with <b>llama cli</b></i>
-        </td>
-        <td align="center">
-            <img width="1392" height="958" alt="Built-in web UI against `llama serve` running Qwen 3.6" src="https://github.com/user-attachments/assets/b402f972-2e32-4def-8771-8d849f08cf2e" />
-            <i>Built-in web UI against <b>llama serve</b></i>
-        </td>
-    </tr>
-<table>
+## Tested configuration
 
-## Description
+i5-13500 VM (6 P-cores with SMT as 12 vCPUs), 91 GiB RAM, RTX 5070 12 GiB (PCIe 4.0 x16), model on NVMe:
 
-The main goal of `llama.cpp` is to enable LLM (and VLM) inference with minimal setup and state-of-the-art performance on
-a wide range of hardware - locally and in the cloud.
+```
+--model Qwen3.8-Flash-Next-Q2.gguf -c 98304 -b 2048 --ubatch-size 2048 -ngl 99 -cmoe
+--cache-type-k q4_0 --cache-type-v q4_0 -np 1 --no-kv-unified
+--threads 6 --cpu-range 0-5 --cpu-strict 1 --load-mode none -fa on
+--spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-p-min 0.6
+```
 
-- Plain C/C++ implementation without any dependencies
-- Apple silicon is a first-class citizen - optimized via ARM NEON, Accelerate and Metal frameworks
-- AVX, AVX2, AVX512 and AMX support for x86 architectures
-- RVV, ZVFH, ZFH, ZICBOP and ZIHINTPAUSE support for RISC-V architectures
-- 1.5-bit, 2-bit, 3-bit, 4-bit, 5-bit, 6-bit, and 8-bit integer quantization for faster inference and reduced memory use
-- Custom CUDA kernels for running LLMs on NVIDIA GPUs (support for AMD GPUs via HIP and Moore Threads GPUs via MUSA)
-- Vulkan and SYCL backend support
-- CPU+GPU hybrid inference to partially accelerate models larger than the total VRAM capacity
+Measured with the server's default sampling (temp 1.0): about 23-24 tok/s decode at
+short context and 21-23 tok/s at 23K, 855-877 tok/s prefill of a 23K prompt; peak VRAM 11.3 GB.
+`--spec-draft-p-min` matters: with the defaults, sampled drafts were accepted only
+33-42% and decode fell below the no-speculation rate. At `-c 131072` the MTP context
+does not fit in 12 GiB, and neither does `--ubatch-size 3072` at `-c 98304` (a 4096
+ubatch would give about +20% prefill). Correctness was checked with coherent answers
+and needle retrieval at 10/50/90% of a 32K prompt; output quality of the 2-bit model
+was not evaluated.
 
-The `llama.cpp` project is build on top of the [ggml](https://github.com/ggml-org/ggml) library.
+Other results on this machine:
 
-## Supported backends
+- 12 threads (the SMT siblings too) decode slower than 6; which 6 vCPUs does not matter.
+- Without MTP, short-context decode is the same (22.4 vs 22.5 tok/s); MTP helps at depth.
+  `--spec-draft-n-max 3` is slower.
 
-| Backend | Target devices |
-| --- | --- |
-| [BLAS](docs/build.md#blas-build) | All |
-| [BLIS](docs/backend/BLIS.md) | All |
-| [CANN](docs/build.md#cann) | Ascend NPU |
-| [CUDA](docs/build.md#cuda) | Nvidia GPU |
-| [HIP](docs/build.md#hip) | AMD GPU |
-| [Hexagon](docs/backend/snapdragon/README.md) | Snapdragon |
-| [IBM zDNN](docs/backend/zDNN.md) | IBM Z & LinuxONE |
-| [MUSA](docs/build.md#musa) | Moore Threads GPU |
-| [Metal](docs/build.md#metal-build) | Apple Silicon |
-| [OpenCL](docs/backend/OPENCL.md) | Adreno GPU |
-| [OpenVINO [In Progress]](docs/backend/OPENVINO.md) | Intel CPUs, GPUs, and NPUs |
-| [RPC](https://github.com/ggml-org/llama.cpp/tree/master/tools/rpc) | All |
-| [SYCL](docs/backend/SYCL.md) | Intel GPU |
-| [VirtGPU](docs/backend/VirtGPU.md) | VirtGPU APIR |
-| [Vulkan](docs/build.md#vulkan) | GPU |
-| [WebGPU](docs/build.md#webgpu) | All |
-| [ZenDNN](docs/build.md#zendnn) | AMD CPU |
+## Where the decode time goes
 
-## Documentation
+`llama bench` tg64 without MTP takes about 39.5 ms per token:
 
-#### Tools
+| Part | ms/token | Notes |
+|--|--:|--|
+| routed experts on the CPU (6 threads) | ~17 | scales with threads, not with SMT: IQ2_XXS compute, not memory bandwidth |
+| GPU kernels | ~13 | `mul_mat_vec_q` 8.5 ms near peak bandwidth; small ops ~4.5 ms |
+| CPU/GPU hand-offs and serial parts | ~10 | two waits per MoE layer, 106 per token |
 
-- [cli](tools/cli/README.md)
-- [completion](tools/completion/README.md)
-- [server](tools/server/README.md)
-- [GBNF grammars](grammars/README.md)
+GPU numbers are from an `nsys` 2026.3 trace (`--cuda-graph-trace=node`), the CPU split
+from the 3- and 6-thread decode rates. Fused Qwen kernels like DwarfStar's can only
+reach the ~4.5 ms of small GPU ops. The n-gram reads cost ~1.9 ms per token before
+the prefetch commit, with cold rows at ~120 us each.
 
-#### Development
+## Optional: Q8_0 hyper-connection mixers
 
-- [How to build](docs/build.md)
-- [Running on Docker](docs/docker.md)
-- [Build on Android](docs/android.md)
-- [Multi-GPU usage](docs/multi-gpu.md)
-- [Performance troubleshooting](docs/development/token_generation_performance_tips.md)
-- [GGML tips & tricks](https://github.com/ggml-org/llama.cpp/wiki/GGML-Tips-&-Tricks)
-- [XCFramework](docs/xcframework.md)
-- [Completions](docs/completions.md)
-- [Models](docs/models.md)
-- [Release process](docs/release.md)
+The 196 `hc_{attn,ffn}_{down,up}` tensors are F16 (1.2 GiB, read every token). This
+converts only those to Q8_0 and copies every other tensor bit for bit (needs the
+quantize copy check commit):
 
-## Contributing
+```sh
+llama quantize \
+  --tensor-type "token_embd=bf16" \
+  --tensor-type "blk\.48\.ffn_(gate|up)_exps=q4_k" --tensor-type "blk\.48\.ffn_down_exps=mxfp4" \
+  --tensor-type "ffn_(gate|up)_exps=iq2_xxs" --tensor-type "ffn_down_exps=q2_k" \
+  --tensor-type "hc_(attn|ffn)_(down|up)=q8_0" \
+  --tensor-type "(hc_(attn|ffn)_inject|output_hc_(down|up)|hc_head_(down|up))=f16" \
+  --tensor-type "(ffn_gate_inp|ssm_alpha|ssm_beta|ssm_conv1d|ple_conv1d)=f32" \
+  Qwen3.8-Flash-Next-Q2.gguf Qwen3.8-Flash-Next-Q2-hcq8.gguf q8_0 6
+```
 
-- Contributors can open PRs
-- Collaborators will be invited based on contributions
-- Maintainers can push to branches in the `llama.cpp` repo and merge PRs into the `master` branch
-- Any help with managing issues, PRs and projects is very appreciated!
-- Read the [CONTRIBUTING.md](CONTRIBUTING.md) for more information
-
-## Acknowledgements
-
-- [yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) - Single-header HTTP server, used by `llama-server` - MIT license
-- [nothings/stb](https://github.com/nothings/stb) - Single-header image format decoder, used by multimodal subsystem - Public domain
-- [nlohmann/json](https://github.com/nlohmann/json) - Single-header JSON library, used by various tools/examples - MIT License
-- [mackron/miniaudio](https://github.com/mackron/miniaudio) - Single-header audio format decoder, used by multimodal subsystem - Public domain
-- [sheredom/subprocess.h](https://github.com/sheredom/subprocess.h) - Single-header process launching solution for C and C++ - Public domain
+It saves 574 MiB of VRAM and gives about +3% short and +5-8% long-context decode. The
+first 128 greedy tokens match the F16 file; no other quality check has been run, so it
+is not the tested configuration.
