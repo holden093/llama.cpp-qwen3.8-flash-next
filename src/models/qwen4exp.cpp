@@ -53,6 +53,11 @@ void llama_model_qwen4exp::load_arch_hparams(llama_model_loader & ml) {
         hparams.rope_sections[1] = 11;
         hparams.rope_sections[2] = 10;
         hparams.rope_sections[3] = 0;
+        if (hparams.n_rot_full != 2u*(11 + 11 + 10)) {
+            throw std::runtime_error(format("%s is absent and the default sections do not fit %s = %u",
+                                            ml.llm_kv(LLM_KV_ROPE_DIMENSION_SECTIONS).c_str(),
+                                            ml.llm_kv(LLM_KV_ROPE_DIMENSION_COUNT).c_str(), hparams.n_rot_full));
+        }
     }
 
     ml.get_key(LLM_KV_SSM_CONV_KERNEL,    hparams.ssm_d_conv);
