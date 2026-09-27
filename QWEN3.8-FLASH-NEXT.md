@@ -30,7 +30,8 @@ the aligned gap, `test-qwen4exp-hparams` the u64 arrays and the M-RoPE default.
 The MoE expert cache is set with `--moe-expert-cache N` (env `LLAMA_ARG_MOE_EXPERT_CACHE`);
 the `LLAMA_MOE_CACHE_SLOTS` name in its commit message and log is from an older revision.
 It only acts on single-token decode, so with `draft-mtp` it skips the multi-token
-verification batches. It has not been measured on the tested configuration below.
+verification batches. On the tested configuration below, 8 slots (all the free VRAM
+allows) gave 25.8 tok/s greedy decode against 26.7 without the cache, so it stays off.
 
 ## Build
 
