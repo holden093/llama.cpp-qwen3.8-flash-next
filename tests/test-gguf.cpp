@@ -496,6 +496,105 @@ static FILE * get_handcrafted_file(const unsigned int seed, const enum handcraft
     return file;
 }
 
+// two F32[8] tensors, the second one at offset_1; the data section has a gap before it
+static FILE * get_gap_file(const uint64_t offset_1) {
+    FILE * file = tmpfile();
+    if (!file) {
+        return nullptr;
+    }
+    helper_write(file, GGUF_MAGIC, 4);
+    helper_write(file, uint32_t(GGUF_VERSION));
+    helper_write(file, int64_t(2)); // n_tensors
+    helper_write(file, int64_t(0)); // n_kv
+    for (int i = 0; i < 2; ++i) {
+        const std::string name = "t" + std::to_string(i);
+        helper_write(file, uint64_t(name.length()));
+        helper_write(file, name.data(), name.length());
+        helper_write(file, uint32_t(1));  // n_dims
+        helper_write(file, int64_t(8));   // ne[0]
+        helper_write(file, int32_t(GGML_TYPE_F32));
+        helper_write(file, i == 0 ? uint64_t(0) : offset_1);
+    }
+    while (ftell(file) % GGUF_DEFAULT_ALIGNMENT != 0) {
+        helper_write(file, char(0));
+    }
+    const uint64_t nbytes = std::max<uint64_t>(offset_1, 32) + 32;
+    for (uint64_t i = 0; i < nbytes; ++i) {
+        helper_write(file, uint8_t(i % 256));
+    }
+    rewind(file);
+    return file;
+}
+
+static std::pair<int, int> test_tensor_offset_gap() {
+    printf("%s: aligned forward gap before a tensor\n", __func__);
+
+    int npass = 0;
+    int ntest = 0;
+
+    struct test_case {
+        const char * desc;
+        uint64_t     offset_1;
+        bool         expect_ok;
+    };
+    const test_case cases[] = {
+        { "aligned_gap_accepted",     96, true  },
+        { "unaligned_gap_rejected",   48, false },
+        { "backward_offset_rejected",  0, false },
+    };
+
+    for (const test_case & tc : cases) {
+        FILE * file = get_gap_file(tc.offset_1);
+#ifdef _WIN32
+        if (!file) {
+            printf("failed to create tmpfile(), needs elevated privileges on Windows");
+            printf("skipping tests");
+            continue;
+        }
+#else
+        GGML_ASSERT(file);
+#endif // _WIN32
+
+        struct ggml_context * ctx = nullptr;
+        struct gguf_init_params gguf_params = {
+            /*no_alloc =*/ false,
+            /*ctx      =*/ &ctx,
+        };
+        struct gguf_context * gguf_ctx = gguf_init_from_file_ptr(file, gguf_params);
+
+        bool ok = bool(gguf_ctx) == tc.expect_ok;
+        if (ok && gguf_ctx) {
+            // the second tensor keeps its stated offset and reads the bytes found there
+            ok = gguf_get_tensor_offset(gguf_ctx, 1) == tc.offset_1;
+            const ggml_tensor * t1 = ggml_get_tensor(ctx, "t1");
+            ok = ok && t1 != nullptr;
+            for (size_t j = 0; ok && j < ggml_nbytes(t1); ++j) {
+                ok = ((const uint8_t *) t1->data)[j] == uint8_t((tc.offset_1 + j) % 256);
+            }
+        }
+
+        printf("%s:   - %s: ", __func__, tc.desc);
+        if (ok) {
+            printf("\033[1;32mOK\033[0m\n");
+            npass++;
+        } else {
+            printf("\033[1;31mFAIL\033[0m\n");
+        }
+        ntest++;
+
+        fclose(file);
+        if (gguf_ctx) {
+            gguf_free(gguf_ctx);
+        }
+        if (ctx) {
+            ggml_free(ctx);
+        }
+    }
+
+    printf("\n");
+    return std::make_pair(npass, ntest);
+}
+
 static bool handcrafted_check_header(const gguf_context * gguf_ctx, const unsigned int seed, const bool has_kv, const bool has_tensors, const bool alignment_defined) {
     if (!gguf_ctx) {
         return false;
@@ -1448,6 +1547,11 @@ int main(int argc, char ** argv) {
     int ntest = 0;
     {
         std::pair<int, int> result = test_handcrafted_file(seed);
+        npass += result.first;
+        ntest += result.second;
+    }
+    {
+        std::pair<int, int> result = test_tensor_offset_gap();
         npass += result.first;
         ntest += result.second;
     }
