@@ -19,10 +19,18 @@ It is llama.cpp **v0.5.0** (`7fe450e1`) plus, in this order:
 | direct lazy reads | open PR [#29030](https://github.com/ggml-org/llama.cpp/pull/29030) @ `e32c6243` | reads n-gram rows with `pread` instead of mmap page faults |
 | MoE expert cache | open PR [#27861](https://github.com/ggml-org/llama.cpp/pull/27861) @ `bccbacdb`, rebased | opt-in `--moe-expert-cache N` (off by default) |
 | QSA pooled-key cache | open PR [#28699](https://github.com/ggml-org/llama.cpp/pull/28699) @ `141f3f56` | incremental indexer key cache (`LLAMA_QSA_NO_POOLED_CACHE=1` disables) |
+| cache + padded down | this branch | zero-pads the cached-expert `down` input too; without it `--moe-expert-cache` aborts on the Q2 file |
+| load-time checks | this branch | rejects default M-RoPE sections that do not fit `n_rot`, and `down_exps` padding other than the quant block size |
 
 The five PRs are unmerged upstream and may change or be superseded; each is one
-commit here so it can be dropped once it lands. The four compatibility patches were
-written with an AI assistant and have not been reviewed upstream.
+commit here so it can be dropped once it lands. The compatibility patches were
+written with an AI assistant and have not been reviewed upstream. `test-gguf` covers
+the aligned gap, `test-qwen4exp-hparams` the u64 arrays and the M-RoPE default.
+
+The MoE expert cache is set with `--moe-expert-cache N` (env `LLAMA_ARG_MOE_EXPERT_CACHE`);
+the `LLAMA_MOE_CACHE_SLOTS` name in its commit message and log is from an older revision.
+It only acts on single-token decode, so with `draft-mtp` it skips the multi-token
+verification batches. It has not been measured on the tested configuration below.
 
 ## Build
 
