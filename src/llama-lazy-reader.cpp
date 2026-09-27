@@ -8,6 +8,10 @@
 #include <thread>
 #include <utility>
 
+#ifdef __linux__
+#include <fcntl.h>
+#endif
+
 llama_lazy_reader::llama_lazy_reader(const llama_file & source, size_t offs, enum ggml_type type,
                                      int64_t row_elems, int64_t n_rows, int n_readers) :
     path(source.name()),
@@ -30,6 +34,12 @@ llama_lazy_reader::llama_lazy_reader(const llama_file & source, size_t offs, enu
         if (!source.same_file(*files.back())) {
             throw std::runtime_error(format("model file changed while opening lazy reader: %s", path.c_str()));
         }
+#ifdef __linux__
+        // rows are small and scattered: kernel readahead only pollutes the page cache
+        if (posix_fadvise(files.back()->file_id(), 0, 0, POSIX_FADV_RANDOM)) {
+            LLAMA_LOG_WARN("%s: posix_fadvise(.., POSIX_FADV_RANDOM) failed: %s\n", __func__, strerror(errno));
+        }
+#endif
     }
 }
 
@@ -42,6 +52,16 @@ std::unique_ptr<llama_lazy_reader> llama_lazy_reader::clone(int n_readers) const
 void llama_lazy_reader::read_range(const std::pair<int32_t, int32_t> * pairs, int64_t begin, int64_t end,
                                    size_t fi, float * dst) const {
     std::vector<uint8_t> bounce(rsize);
+
+#ifdef __linux__
+    // queue all uncached rows at once, so the reads below wait on one disk round trip instead of one per row
+    // failure only loses the prefetch, the reads below still report errors
+    for (int64_t i = begin; i < end; ++i) {
+        if (i == begin || pairs[i].first != pairs[i - 1].first) {
+            posix_fadvise(files[fi]->file_id(), (off_t) (offs + (size_t) pairs[i].first * rsize), (off_t) rsize, POSIX_FADV_WILLNEED);
+        }
+    }
+#endif
 
     for (int64_t i = begin; i < end; ) {
         int64_t j = i;
