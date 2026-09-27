@@ -291,6 +291,11 @@ void llama_model_qwen4exp::load_arch_tensors(llama_model_loader & ml) {
         if (const auto * w = ml.get_weight(tn(LLM_TENSOR_FFN_DOWN_EXPS, "weight", il).str().c_str())) {
             if (w->tensor->ne[0] > n_ff_exp) {
                 n_ff_down = w->tensor->ne[0];
+                // only the padding the quant block size forces is valid
+                if (n_ff_down != GGML_PAD(n_ff_exp, ggml_blck_size(w->tensor->type))) {
+                    throw std::runtime_error(format("%s has input width %" PRId64 ", expected %" PRId64 " or its %s block padding",
+                                                    w->tensor->name, n_ff_down, n_ff_exp, ggml_type_name(w->tensor->type)));
+                }
             }
         }
         layer.ffn_down_exps = create_tensor(tn(LLM_TENSOR_FFN_DOWN_EXPS, "weight", il), { n_ff_down, n_embd, n_expert }, flags);
