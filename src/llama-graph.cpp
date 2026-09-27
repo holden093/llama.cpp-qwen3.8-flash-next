@@ -2416,6 +2416,11 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
             }
         }
 
+        if (mcache->down_c->ne[0] > act_g->ne[0]) {
+            // down_exps stored with a padded input width: zero-extend, as for the host chain
+            act_g = ggml_pad(ctx0, act_g, mcache->down_c->ne[0] - act_g->ne[0], 0, 0, 0);
+        }
+
         ggml_tensor * down_g = ggml_mul_mat_id(ctx0, mcache->down_c, act_g, mc_slot_ids);
         cb(down_g, "ffn_moe_cache_down", il);
 
