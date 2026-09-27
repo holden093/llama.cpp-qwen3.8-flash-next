@@ -40,20 +40,51 @@ allows) gave 25.8 tok/s greedy decode against 26.7 without the cache, so it stay
 ## Build
 
 ```sh
-docker build -f .devops/cuda.Dockerfile --target server \
-  --build-arg UBUNTU_VERSION=24.04 --build-arg CUDA_VERSION=12.8.1 --build-arg CUDA_DOCKER_ARCH=120 \
-  -t llamacpp-cuda:qwen3.8-flash-next .
+docker build \
+  -f .devops/cuda.Dockerfile \
+  --target server \
+  --build-arg UBUNTU_VERSION=24.04 \
+  --build-arg CUDA_VERSION=12.8.1 \
+  --build-arg CUDA_DOCKER_ARCH=120 \
+  -t llamacpp-cuda:qwen3.8-flash-next \
+  .
 ```
 
 ## Tested configuration
 
-i5-13500 VM (6 P-cores with SMT as 12 vCPUs), 91 GiB RAM, RTX 5070 12 GiB (PCIe 4.0 x16), model on NVMe:
+i5-13500 VM (6 P-cores with SMT as 12 vCPUs), 91 GiB RAM, RTX 5070 12 GiB (PCIe 4.0 x16), model on NVMe. The server runs with:
 
-```
---model Qwen3.8-Flash-Next-Q2.gguf -c 98304 -b 2048 --ubatch-size 2048 -ngl 99 -cmoe
---cache-type-k q4_0 --cache-type-v q4_0 -np 1 --no-kv-unified
---threads 6 --cpu-range 0-5 --cpu-strict 1 --load-mode none -fa on
---spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-p-min 0.6
+```sh
+llama-server \
+  --model /gguf/Qwen3.8-Flash-Next-Q2.gguf \
+  --port 8080 \
+  -c 98304 \
+  -b 2048 \
+  --ubatch-size 2048 \
+  -ngl 99 \
+  -cmoe \
+  --cache-type-k q4_0 \
+  --cache-type-v q4_0 \
+  --no-kv-unified \
+  -np 1 \
+  --cpu-mask 0 \
+  --cpu-range 0-5 \
+  --cpu-strict 1 \
+  --threads 6 \
+  --threads-batch 6 \
+  --load-mode none \
+  --no-repack \
+  --fit off \
+  -fa on \
+  --spec-type draft-mtp \
+  --spec-draft-n-max 2 \
+  --spec-draft-p-min 0.6 \
+  --cache-ram 1024 \
+  --jinja \
+  --temp 1.0 \
+  --top-p 1.0 \
+  --min-p 0.01 \
+  --metrics
 ```
 
 Measured with the server's default sampling (temp 1.0): about 23-24 tok/s decode at
