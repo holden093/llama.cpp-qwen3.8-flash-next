@@ -52,11 +52,11 @@ docker build \
 
 ## Tested configuration
 
-i5-13500 VM (6 P-cores with SMT as 12 vCPUs), 91 GiB RAM, RTX 5070 12 GiB (PCIe 4.0 x16), model on NVMe. The server runs with:
+i5-13500 VM (6 P-cores with SMT as 12 vCPUs), 91 GiB RAM, RTX 5070 12 GiB (PCIe 4.0 x16), model on NVMe. The model is the Q2 with Q8_0 hyper-connection mixers (see below). The server runs with:
 
 ```sh
 llama-server \
-  --model /gguf/Qwen3.8-Flash-Next-Q2.gguf \
+  --model /gguf/Qwen3.8-Flash-Next-Q2-hcq8.gguf \
   --port 8080 \
   -c 98304 \
   -b 2048 \
@@ -117,7 +117,7 @@ from the 3- and 6-thread decode rates. Fused Qwen kernels like DwarfStar's can o
 reach the ~4.5 ms of small GPU ops. The n-gram reads cost ~1.9 ms per token before
 the prefetch commit, with cold rows at ~120 us each.
 
-## Optional: Q8_0 hyper-connection mixers
+## Q8_0 hyper-connection mixers
 
 The 196 `hc_{attn,ffn}_{down,up}` tensors are F16 (1.2 GiB, read every token). This
 converts only those to Q8_0 and copies every other tensor bit for bit (needs the
@@ -134,6 +134,18 @@ llama quantize \
   Qwen3.8-Flash-Next-Q2.gguf Qwen3.8-Flash-Next-Q2-hcq8.gguf q8_0 6
 ```
 
-It saves 574 MiB of VRAM and gives about +3% short and +5-8% long-context decode. The
-first 128 greedy tokens match the F16 file; no other quality check has been run, so it
-is not the tested configuration.
+It saves 574 MiB of VRAM and gives about +3% short and +5-8% long-context decode.
+
+KL divergence against the F16-mixer file with F16 KV (`llama perplexity`, 32 chunks of 4096
+on interleaved wikitext-2, C++ code and the DwarfStar Alibaba fixtures, 65.5K scored tokens):
+
+| Variant | Mean KLD | Same top token | PPL ratio |
+|--|--:|--:|--:|
+| F16 mixers, F16 KV (rerun) | 0.000 | 100.0% | 1.001 |
+| Q8_0 mixers, F16 KV | 0.032 | 96.3% | 0.996 |
+| F16 mixers, KV q4_0 | 0.047 | 95.8% | 1.020 |
+| Q8_0 mixers, KV q4_0 (tested configuration) | 0.039 | 95.9% | 0.999 |
+
+The mixers are more sensitive than their size suggests: the flips are concentrated in
+near-tie tokens (median KLD 0.00025). The cost is still below that of the q4_0 KV cache,
+and the tested configuration ends up closer to the reference than F16 mixers with q4_0 KV.
